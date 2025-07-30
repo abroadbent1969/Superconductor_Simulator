@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hyper-Realistic Superconductor Simulator</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary-bg: #f8f9fa;
+            --secondary-bg: #ffffff;
+            --border-color: #dee2e6;
+            --text-color: #212529;
+            --primary-accent: #007bff;
+            --danger-color: #dc3545;
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--primary-bg);
+            color: var(--text-color);
+        }
+        .container {
+            max-width: 1000px;
+            margin: auto;
+            background-color: var(--secondary-bg);
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        h1 {
+            color: var(--primary-accent);
+            text-align: center;
+            margin-bottom: 25px;
+        }
+        .controls, .element-entry {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        .element-entry select {
+            flex: 3;
+        }
+        .element-entry input, .element-entry select.doping {
+            flex: 1;
+        }
+        .total-percent-display {
+            font-weight: bold;
+            padding: 8px 12px;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+        }
+        select, input, button {
+            padding: 10px;
+            margin: 0;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        button {
+            cursor: pointer;
+            background-color: var(--primary-accent);
+            color: white;
+            border: none;
+            transition: background-color 0.2s;
+        }
+        button.remove-btn {
+            background-color: var(--danger-color);
+        }
+        button:hover {
+            opacity: 0.85;
+        }
+        #output {
+            margin-top: 30px;
+            padding: 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background-color: #fdfdff;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 15px;
+        }
+        th, td {
+            border: 1px solid var(--border-color);
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: var(--primary-bg);
+        }
+        .final-verdict {
+            font-size: 1.2em;
+            font-weight: bold;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .verdict-yes {
+            background-color: #e9f7ef;
+            color: var(--success-color);
+        }
+        .verdict-no {
+            background-color: #fbebed;
+            color: var(--danger-color);
+        }
+        canvas {
+            margin-top: 20px;
+            max-width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hyper-Realistic Superconductor Simulator</h1>
+
+        <div class="controls">
+            <label>Operating Temperature (K): </label>
+            <input type="number" id="operatingTemp" placeholder="e.g., 77" min="0" step="0.1" value="77">
+            <label>Pressure (GPa): </label>
+            <input type="number" id="pressure" placeholder="e.g., 0" min="0" step="1" value="0">
+            <span id="totalPercentDisplay" class="total-percent-display">Total: 0%</span>
+        </div>
+
+        <div id="elementContainer">
+            <div class="element-entry">
+                <select class="element-symbol" onchange="updateTotalPercent()"></select>
+                <input type="number" class="element-percent" placeholder="Percentage (%)" min="0" max="100" oninput="updateTotalPercent()">
+                <select class="doping" onchange="updateTotalPercent()">
+                    <option value="0">No Doping</option>
+                    <option value="0.05">5% SiC</option>
+                    <option value="0.1">10% SiC</option>
+                    <option value="0.15">15% Oxygen</option>
+                </select>
+                <button class="remove-btn" onclick="removeElement(this)">Remove</button>
+            </div>
+        </div>
+
+        <button onclick="addElement()">Add Material</button>
+        <button onclick="calculateCompound()">Calculate Compound</button>
+        
+        <div id="output"></div>
+        <canvas id="tcChart"></canvas>
+    </div>
+
+    <script>
+        // Expanded material database with critical field, current density, Debye temperature
+        const materialDatabase = {
+            // Elemental Superconductors
+            'Al': { name: 'Aluminum', type: 'Element', atomicMass: 26.982, Tc: 1.18, valenceElectrons: 3, crystalStructure: 'FCC', Hc: 0.01, Jc: 0.1, debyeTemp: 428 },
+            'Sn': { name: 'Tin', type: 'Element', atomicMass: 118.71, Tc: 3.72, valenceElectrons: 4, crystalStructure: 'Tetragonal', Hc: 0.03, Jc: 0.2, debyeTemp: 200 },
+            'Pb': { name: 'Lead', type: 'Element', atomicMass: 207.2, Tc: 7.19, valenceElectrons: 4, crystalStructure: 'FCC', Hc: 0.08, Jc: 0.5, debyeTemp: 105 },
+            'Nb': { name: 'Niobium', type: 'Element', atomicMass: 92.906, Tc: 9.25, valenceElectrons: 5, crystalStructure: 'BCC', Hc: 0.2, Jc: 1.0, debyeTemp: 275 },
+            'Hg': { name: 'Mercury', type: 'Element', atomicMass: 200.59, Tc: 4.15, valenceElectrons: 2, crystalStructure: 'Rhombohedral', Hc: 0.04, Jc: 0.3, debyeTemp: 72 },
+            'Ti': { name: 'Titanium', type: 'Element', atomicMass: 47.867, Tc: 0.40, valenceElectrons: 4, crystalStructure: 'HCP', Hc: 0.005, Jc: 0.05, debyeTemp: 420 },
+            'V': { name: 'Vanadium', type: 'Element', atomicMass: 50.942, Tc: 5.40, valenceElectrons: 5, crystalStructure: 'BCC', Hc: 0.1, Jc: 0.8, debyeTemp: 380 },
+            'Ta': { name: 'Tantalum', type: 'Element', atomicMass: 180.948, Tc: 4.47, valenceElectrons: 5, crystalStructure: 'BCC', Hc: 0.08, Jc: 0.6, debyeTemp: 240 },
+            'In': { name: 'Indium', type: 'Element', atomicMass: 114.818, Tc: 3.41, valenceElectrons: 3, crystalStructure: 'Tetragonal', Hc: 0.03, Jc: 0.4, debyeTemp: 108 },
+            'Tl': { name: 'Thallium', type: 'Element', atomicMass: 204.383, Tc: 2.38, valenceElectrons: 3, crystalStructure: 'HCP', Hc: 0.02, Jc: 0.3, debyeTemp: 78 },
+            'Re': { name: 'Rhenium', type: 'Element', atomicMass: 186.207, Tc: 1.70, valenceElectrons: 7, crystalStructure: 'HCP', Hc: 0.02, Jc: 0.2, debyeTemp: 416 },
+            'La': { name: 'Lanthanum', type: 'Element', atomicMass: 138.905, Tc: 4.88, valenceElectrons: 3, crystalStructure: 'HCP', Hc: 0.08, Jc: 0.5, debyeTemp: 142 },
+            'Pa': { name: 'Protactinium', type: 'Element', atomicMass: 231.036, Tc: 1.40, valenceElectrons: 5, crystalStructure: 'Tetragonal', Hc: 0.01, Jc: 0.1, debyeTemp: 180 },
+            'Zn': { name: 'Zinc', type: 'Element', atomicMass: 65.38, Tc: 0.85, valenceElectrons: 2, crystalStructure: 'HCP', Hc: 0.005, Jc: 0.05, debyeTemp: 327 },
+            'Cd': { name: 'Cadmium', type: 'Element', atomicMass: 112.411, Tc: 0.52, valenceElectrons: 2, crystalStructure: 'HCP', Hc: 0.003, Jc: 0.03, debyeTemp: 209 },
+            'Ga': { name: 'Gallium', type: 'Element', atomicMass: 69.723, Tc: 1.08, valenceElectrons: 3, crystalStructure: 'Orthorhombic', Hc: 0.005, Jc: 0.05, debyeTemp: 320 },
+            'Mo': { name: 'Molybdenum', type: 'Element', atomicMass: 95.96, Tc: 0.92, valenceElectrons: 6, crystalStructure: 'BCC', Hc: 0.01, Jc: 0.1, debyeTemp: 460 },
+            'Os': { name: 'Osmium', type: 'Element', atomicMass: 190.23, Tc: 0.66, valenceElectrons: 8, crystalStructure: 'HCP', Hc: 0.007, Jc: 0.05, debyeTemp: 500 },
+            'W': { name: 'Tungsten', type: 'Element', atomicMass: 183.84, Tc: 0.02, valenceElectrons: 6, crystalStructure: 'BCC', Hc: 0.0001, Jc: 0.01, debyeTemp: 400 },
+            'Zr': { name: 'Zirconium', type: 'Element', atomicMass: 91.224, Tc: 0.55, valenceElectrons: 4, crystalStructure: 'HCP', Hc: 0.005, Jc: 0.05, debyeTemp: 290 },
+            'Tc': { name: 'Technetium', type: 'Element', atomicMass: 98, Tc: 7.80, valenceElectrons: 7, crystalStructure: 'HCP', Hc: 0.1, Jc: 0.7, debyeTemp: 400 },
+            'Ru': { name: 'Ruthenium', type: 'Element', atomicMass: 101.07, Tc: 0.49, valenceElectrons: 8, crystalStructure: 'HCP', Hc: 0.005, Jc: 0.05, debyeTemp: 600 },
+            'Rh': { name: 'Rhodium', type: 'Element', atomicMass: 102.906, Tc: 0.0003, valenceElectrons: 9, crystalStructure: 'FCC', Hc: 0.00001, Jc: 0.001, debyeTemp: 480 },
+            'Ir': { name: 'Iridium', type: 'Element', atomicMass: 192.217, Tc: 0.11, valenceElectrons: 9, crystalStructure: 'FCC', Hc: 0.002, Jc: 0.02, debyeTemp: 420 },
+            'Th': { name: 'Thorium', type: 'Element', atomicMass: 232.038, Tc: 1.38, valenceElectrons: 4, crystalStructure: 'FCC', Hc: 0.01, Jc: 0.1, debyeTemp: 100 },
+            'Lu': { name: 'Lutetium', type: 'Element', atomicMass: 174.967, Tc: 0.10, valenceElectrons: 3, crystalStructure: 'HCP', Hc: 0.001, Jc: 0.01, debyeTemp: 210 },
+            'Hf': { name: 'Hafnium', type: 'Element', atomicMass: 178.49, Tc: 0.13, valenceElectrons: 4, crystalStructure: 'HCP', Hc: 0.002, Jc: 0.02, debyeTemp: 252 },
+            // High-Pressure Elements
+            'Si': { name: 'Silicon (High Pressure)', type: 'Element (HP)', atomicMass: 28.085, Tc: 7.0, valenceElectrons: 4, crystalStructure: 'Diamond', Hc: 0.05, Jc: 0.3, debyeTemp: 645 },
+            'Se': { name: 'Selenium (High Pressure)', type: 'Element (HP)', atomicMass: 78.96, Tc: 7.0, valenceElectrons: 6, crystalStructure: 'Trigonal', Hc: 0.05, Jc: 0.3, debyeTemp: 90 },
+            'U': { name: 'Uranium (High Pressure)', type: 'Element (HP)', atomicMass: 238.029, Tc: 0.60, valenceElectrons: 6, crystalStructure: 'Orthorhombic', Hc: 0.01, Jc: 0.05, debyeTemp: 200 },
+            'Ce': { name: 'Cerium (High Pressure)', type: 'Element (HP)', atomicMass: 140.116, Tc: 1.50, valenceElectrons: 3, crystalStructure: 'FCC', Hc: 0.02, Jc: 0.1, debyeTemp: 180 },
+            'Bi': { name: 'Bismuth (Disordered)', type: 'Element (HP)', atomicMass: 208.98, Tc: 6.0, valenceElectrons: 5, crystalStructure: 'Amorphous', Hc: 0.05, Jc: 0.3, debyeTemp: 120 },
+            // Alloys & Intermetallics
+            'NbTi': { name: 'Niobium-Titanium', type: 'Alloy', atomicMass: 70.386, Tc: 10.0, valenceElectrons: 4.5, crystalStructure: 'BCC', Hc: 12.0, Jc: 2000, debyeTemp: 300 },
+            'Nb3Sn': { name: 'Niobium-Tin', type: 'Alloy', atomicMass: 149.095, Tc: 18.3, valenceElectrons: 4.75, crystalStructure: 'A15', Hc: 25.0, Jc: 2500, debyeTemp: 250 },
+            'Nb3Al': { name: 'Niobium-Aluminum', type: 'Alloy', atomicMass: 119.879, Tc: 18.9, valenceElectrons: 4.5, crystalStructure: 'A15', Hc: 20.0, Jc: 2000, debyeTemp: 260 },
+            'Nb3Ge': { name: 'Niobium-Germanium', type: 'Alloy', atomicMass: 165.586, Tc: 23.2, valenceElectrons: 4.75, crystalStructure: 'A15', Hc: 37.0, Jc: 3000, debyeTemp: 240 },
+            'MgB2': { name: 'Magnesium Diboride', type: 'Alloy', atomicMass: 45.929, Tc: 39.0, valenceElectrons: 2.66, crystalStructure: 'Hexagonal', Hc: 15.0, Jc: 1000, debyeTemp: 900 },
+            // Cuprates
+            'YBCO': { name: 'YBa2Cu3O7', type: 'Cuprate', atomicMass: 666.194, Tc: 92.0, valenceElectrons: null, crystalStructure: 'Orthorhombic', Hc: 100.0, Jc: 5000, debyeTemp: 400 },
+            'Bi2212': { name: 'Bi2Sr2CaCu2O8', type: 'Cuprate', atomicMass: 731.989, Tc: 85.0, valenceElectrons: null, crystalStructure: 'Tetragonal', Hc: 90.0, Jc: 4000, debyeTemp: 350 },
+            'Bi2223': { name: 'Bi2Sr2Ca2Cu3O10', type: 'Cuprate', atomicMass: 932.986, Tc: 110.0, valenceElectrons: null, crystalStructure: 'Tetragonal', Hc: 120.0, Jc: 6000, debyeTemp: 330 },
+            'Hg1223': { name: 'HgBa2Ca2Cu3O8', type: 'Cuprate', atomicMass: 895.6, Tc: 135.0, valenceElectrons: null, crystalStructure: 'Tetragonal', Hc: 150.0, Jc: 7000, debyeTemp: 320 },
+            'Tl2223': { name: 'Tl2Ba2Ca2Cu3O10', type: 'Cuprate', atomicMass: 958.4, Tc: 125.0, valenceElectrons: null, crystalStructure: 'Tetragonal', Hc: 130.0, Jc: 6500, debyeTemp: 310 },
+            // Iron-Based
+            'LaOFeAs': { name: 'LaOFeAs (F-doped)', type: 'Iron-Based', atomicMass: 245.841, Tc: 26.0, valenceElectrons: null, crystalStructure: 'Tetragonal', Hc: 50.0, Jc: 2000, debyeTemp: 300 },
+            'SmFeAsO': { name: 'SmFeAsO (F-doped)', type: 'Iron-Based', atomicMass: 273.9, Tc: 55.0, valenceElectrons: null, crystalStructure: 'Tetragonal', Hc: 70.0, Jc: 3000, debyeTemp: 280 },
+            // Fullerides
+            'K3C60': { name: 'Potassium Fulleride', type: 'Fulleride', atomicMass: 840.6, Tc: 19.0, valenceElectrons: null, crystalStructure: 'FCC', Hc: 10.0, Jc: 500, debyeTemp: 150 },
+            'Cs3C60': { name: 'Cesium Fulleride', type: 'Fulleride', atomicMass: 1119.9, Tc: 38.0, valenceElectrons: null, crystalStructure: 'FCC', Hc: 15.0, Jc: 800, debyeTemp: 140 },
+            // Borocarbides
+            'HoNi2B2C': { name: 'HoNi2B2C', type: 'Borocarbide', atomicMass: 274.586, Tc: 8.0, valenceElectrons: null, crystalStructure: 'Tetragonal', Hc: 5.0, Jc: 300, debyeTemp: 250 },
+            // Others
+            'Ba8Si46': { name: 'Ba8Si46', type: 'Silicide', atomicMass: 1496.992, Tc: 8.0, valenceElectrons: null, crystalStructure: 'Cubic', Hc: 3.0, Jc: 200, debyeTemp: 200 },
+            'La2PrNi2O7': { name: 'La2PrNi2O7', type: 'Nickelate', atomicMass: 567.762, Tc: 28.0, valenceElectrons: null, crystalStructure: 'Tetragonal', Hc: 20.0, Jc: 1000, debyeTemp: 270 },
+            'SnTe': { name: 'Tin Telluride (Doped)', type: 'Chalcogenide', atomicMass: 246.31, Tc: 0.3, valenceElectrons: null, crystalStructure: 'Cubic', Hc: 0.01, Jc: 0.05, debyeTemp: 130 },
+            'Ag2F': { name: 'Disilver Fluoride', type: 'Fluoride', atomicMass: 234.735, Tc: 0.066, valenceElectrons: null, crystalStructure: 'Hexagonal', Hc: 0.001, Jc: 0.01, debyeTemp: 100 },
+            'C8K': { name: 'Carbon-Potassium', type: 'Intercalated', atomicMass: 135.173, Tc: 0.39, valenceElectrons: null, crystalStructure: 'Hexagonal', Hc: 0.005, Jc: 0.02, debyeTemp: 200 },
+            // High-Pressure Superconductors
+            'LaH10': { name: 'Lanthanum Hydride', type: 'Hydride (HP)', atomicMass: 148.95, Tc: 250.0, valenceElectrons: null, crystalStructure: 'Cubic', Hc: 200.0, Jc: 10000, debyeTemp: 1000, pressure: 155 },
+            'YH9': { name: 'Yttrium Hydride', type: 'Hydride (HP)', atomicMass: 97.91, Tc: 243.0, valenceElectrons: null, crystalStructure: 'Cubic', Hc: 190.0, Jc: 9500, debyeTemp: 950, pressure: 170 }
+        };
+
+        // Crystal structure compatibility matrix
+        const crystalCompatibilityMatrix = {
+            'BCC': { 'BCC': 1.0, 'FCC': 0.8, 'HCP': 0.7, 'A15': 0.6, 'Tetragonal': 0.5, 'Orthorhombic': 0.3, 'Rhombohedral': 0.2, 'Hexagonal': 0.4, 'Cubic': 0.6, 'Diamond': 0.2, 'Trigonal': 0.2, 'Amorphous': 0.1 },
+            'FCC': { 'BCC': 0.8, 'FCC': 1.0, 'HCP': 0.9, 'A15': 0.7, 'Tetragonal': 0.6, 'Orthorhombic': 0.4, 'Rhombohedral': 0.3, 'Hexagonal': 0.5, 'Cubic': 0.7, 'Diamond': 0.3, 'Trigonal': 0.3, 'Amorphous': 0.1 },
+            'HCP': { 'BCC': 0.7, 'FCC': 0.9, 'HCP': 1.0, 'A15': 0.6, 'Tetragonal': 0.5, 'Orthorhombic': 0.3, 'Rhombohedral': 0.2, 'Hexagonal': 0.8, 'Cubic': 0.6, 'Diamond': 0.2, 'Trigonal': 0.2, 'Amorphous': 0.1 },
+            'A15': { 'BCC': 0.6, 'FCC': 0.7, 'HCP': 0.6, 'A15': 1.0, 'Tetragonal': 0.8, 'Orthorhombic': 0.2, 'Rhombohedral': 0.2, 'Hexagonal': 0.3, 'Cubic': 0.9, 'Diamond': 0.2, 'Trigonal': 0.2, 'Amorphous': 0.1 },
+            'Tetragonal': { 'BCC': 0.5, 'FCC': 0.6, 'HCP': 0.5, 'A15': 0.8, 'Tetragonal': 1.0, 'Orthorhombic': 0.7, 'Rhombohedral': 0.2, 'Hexagonal': 0.4, 'Cubic': 0.8, 'Diamond': 0.2, 'Trigonal': 0.2, 'Amorphous': 0.1 },
+            'Orthorhombic': { 'BCC': 0.3, 'FCC': 0.4, 'HCP': 0.3, 'A15': 0.2, 'Tetragonal': 0.7, 'Orthorhombic': 1.0, 'Rhombohedral': 0.2, 'Hexagonal': 0.3, 'Cubic': 0.4, 'Diamond': 0.2, 'Trigonal': 0.2, 'Amorphous': 0.1 },
+            'Rhombohedral': { 'BCC': 0.2, 'FCC': 0.3, 'HCP': 0.2, 'A15': 0.2, 'Tetragonal': 0.2, 'Orthorhombic': 0.2, 'Rhombohedral': 1.0, 'Hexagonal': 0.2, 'Cubic': 0.2, 'Diamond': 0.2, 'Trigonal': 0.2, 'Amorphous': 0.1 },
+            'Hexagonal': { 'BCC': 0.4, 'FCC': 0.5, 'HCP': 0.8, 'A15': 0.3, 'Tetragonal': 0.4, 'Orthorhombic': 0.3, 'Rhombohedral': 0.2, 'Hexagonal': 1.0, 'Cubic': 0.4, 'Diamond': 0.2, 'Trigonal': 0.2, 'Amorphous': 0.1 },
+            'Cubic': { 'BCC': 0.6, 'FCC': 0.7, 'HCP': 0.6, 'A15': 0.9, 'Tetragonal': 0.8, 'Orthorhombic': 0.4, 'Rhombohedral': 0.2, 'Hexagonal': 0.4, 'Cubic': 1.0, 'Diamond': 0.3, 'Trigonal': 0.3, 'Amorphous': 0.1 },
+            'Diamond': { 'BCC': 0.2, 'FCC': 0.3, 'HCP': 0.2, 'A15': 0.2, 'Tetragonal': 0.2, 'Orthorhombic': 0.2, 'Rhombohedral': 0.2, 'Hexagonal': 0.2, 'Cubic': 0.3, 'Diamond': 1.0, 'Trigonal': 0.2, 'Amorphous': 0.1 },
+            'Trigonal': { 'BCC': 0.2, 'FCC': 0.3, 'HCP': 0.2, 'A15': 0.2, 'Tetragonal': 0.2, 'Orthorhombic': 0.2, 'Rhombohedral': 0.2, 'Hexagonal': 0.2, 'Cubic': 0.3, 'Diamond': 0.2, 'Trigonal': 1.0, 'Amorphous': 0.1 },
+            'Amorphous': { 'BCC': 0.1, 'FCC': 0.1, 'HCP': 0.1, 'A15': 0.1, 'Tetragonal': 0.1, 'Orthorhombic': 0.1, 'Rhombohedral': 0.1, 'Hexagonal': 0.1, 'Cubic': 0.1, 'Diamond': 0.1, 'Trigonal': 0.1, 'Amorphous': 1.0 }
+        };
+
+        // Populate dropdowns with categorized materials
+        function populateDropdowns() {
+            const dropdowns = document.querySelectorAll('.element-symbol');
+            const categories = {};
+            
+            Object.keys(materialDatabase).forEach(symbol => {
+                const material = materialDatabase[symbol];
+                if (!categories[material.type]) categories[material.type] = [];
+                categories[material.type].push({ symbol, name: material.name });
+            });
+
+            let optionsHtml = '<option value="" disabled selected>Select a Material...</option>';
+            for (const type in categories) {
+                optionsHtml += `<optgroup label="${type}">`;
+                categories[type].sort((a, b) => a.name.localeCompare(b.name)).forEach(mat => {
+                    optionsHtml += `<option value="${mat.symbol}">${mat.name} (${mat.symbol})</option>`;
+                });
+                optionsHtml += `</optgroup>`;
+            }
+            
+            dropdowns.forEach(dropdown => {
+                const selectedValue = dropdown.value;
+                dropdown.innerHTML = optionsHtml;
+                dropdown.value = selectedValue;
+            });
+        }
+
+        // Initialize UI
+        document.addEventListener('DOMContentLoaded', () => {
+            populateDropdowns();
+            updateTotalPercent();
+        });
+
+        function addElement() {
+            const container = document.getElementById('elementContainer');
+            const entry = document.createElement('div');
+            entry.className = 'element-entry';
+            entry.innerHTML = `
+                <select class="element-symbol" onchange="updateTotalPercent()"></select>
+                <input type="number" class="element-percent" placeholder="Percentage (%)" min="0" max="100" oninput="updateTotalPercent()">
+                <select class="doping" onchange="updateTotalPercent()">
+                    <option value="0">No Doping</option>
+                    <option value="0.05">5% SiC</option>
+                    <option value="0.1">10% SiC</option>
+                    <option value="0.15">15% Oxygen</option>
+                </select>
+                <button class="remove-btn" onclick="removeElement(this)">Remove</button>
+            `;
+            container.appendChild(entry);
+            populateDropdowns();
+        }
+
+        function removeElement(button) {
+            if (document.querySelectorAll('.element-entry').length > 1) {
+                button.parentElement.remove();
+                updateTotalPercent();
+            } else {
+                alert('At least one material is required.');
+            }
+        }
+
+        function updateTotalPercent() {
+            const inputs = document.querySelectorAll('.element-percent');
+            let total = 0;
+            inputs.forEach(input => total += parseFloat(input.value) || 0);
+            
+            const display = document.getElementById('totalPercentDisplay');
+            display.textContent = `Total: ${total.toFixed(1)}%`;
+            
+            if (Math.abs(total - 100) > 0.01) {
+                display.style.backgroundColor = 'var(--warning-color)';
+                display.style.color = 'var(--text-color)';
+            } else {
+                display.style.backgroundColor = 'var(--success-color)';
+                display.style.color = 'white';
+            }
+        }
+
+        // Calculate crystal compatibility using the matrix
+        function calculateCrystalCompatibility(compound) {
+            if (compound.length === 1) return 1.0;
+            const structures = compound.map(el => materialDatabase[el.symbol].crystalStructure);
+            let compatibilityScore = 0;
+            let count = 0;
+            for (let i = 0; i < structures.length; i++) {
+                for (let j = i + 1; j < structures.length; j++) {
+                    compatibilityScore += crystalCompatibilityMatrix[structures[i]]?.[structures[j]] ?? 0.1;
+                    count++;
+                }
+            }
+            return count ? compatibilityScore / count : 1.0;
+        }
+
+        // BCS-inspired Tc estimation with doping and pressure effects
+        function estimateTc(compound, pressure) {
+            let baseTc = 0, totalValenceElectrons = 0, totalDebyeTemp = 0;
+            let dopingFactor = 1.0, pressureFactor = 1.0;
+            let canUseMatthias = true;
+
+            compound.forEach(el => {
+                const data = materialDatabase[el.symbol];
+                const doping = parseFloat(el.doping);
+                baseTc += (el.percent / 100) * data.Tc;
+                totalDebyeTemp += (el.percent / 100) * data.debyeTemp;
+                if (data.valenceElectrons === null) canUseMatthias = false;
+                totalValenceElectrons += (el.percent / 100) * (data.valenceElectrons || 0);
+
+                // Doping effects (SiC enhances Jc, oxygen enhances Tc for cuprates)
+                if (doping === 0.05) dopingFactor += 0.1; // 5% SiC
+                else if (doping === 0.1) dopingFactor += 0.2; // 10% SiC
+                else if (doping === 0.15 && data.type === 'Cuprate') dopingFactor += 0.3; // 15% Oxygen for cuprates
+
+                // Pressure effects for high-pressure materials
+                if (data.pressure && pressure >= data.pressure) pressureFactor += (pressure - data.pressure) * 0.01;
+                else if (data.pressure && pressure < data.pressure) pressureFactor *= 0.1;
+            });
+
+            // BCS Tc model: Tc ~ θ_D * exp(-1/(N(0)V)) simplified
+            const couplingStrength = canUseMatthias ? (0.2 + 0.1 * totalValenceElectrons) : 0.3;
+            let bcsTc = totalDebyeTemp * Math.exp(-1 / couplingStrength) / 10;
+
+            // Matthias's rules for alloys
+            if (canUseMatthias) {
+                const peak1 = 4.7, peak2 = 6.5, width = 0.5;
+                const factor1 = Math.exp(-Math.pow(totalValenceElectrons - peak1, 2) / (2 * width * width));
+                const factor2 = Math.exp(-Math.pow(totalValenceElectrons - peak2, 2) / (2 * width * width));
+                bcsTc *= (1 + 2 * Math.max(factor1, factor2));
+            }
+
+            // Apply doping and pressure
+            return Math.max(baseTc, bcsTc) * dopingFactor * pressureFactor;
+        }
+
+        // Estimate critical current density with doping
+        function estimateJc(compound) {
+            let baseJc = 0;
+            compound.forEach(el => {
+                const data = materialDatabase[el.symbol];
+                let jc = data.Jc;
+                if (el.doping === 0.05) jc *= 1.5; // 5% SiC
+                else if (el.doping === 0.1) jc *= 2.0; // 10% SiC
+                else if (el.doping === 0.15) jc *= 1.2; // Oxygen
+                baseJc += (el.percent / 100) * jc;
+            });
+            return baseJc;
+        }
+
+        // Estimate critical magnetic field
+        function estimateHc(compound, operatingTemp, estimatedTc) {
+            let baseHc = 0;
+            compound.forEach(el => {
+                const data = materialDatabase[el.symbol];
+                // Hc(T) = Hc(0) * (1 - (T/Tc)^2) simplified
+                const tempFactor = 1 - Math.pow(operatingTemp / data.Tc, 2);
+                baseHc += (el.percent / 100) * data.Hc * Math.max(0, tempFactor);
+            });
+            return baseHc;
+        }
+
+        // Stability check for material combination
+        function checkStability(compound) {
+            const types = [...new Set(compound.map(el => materialDatabase[el.symbol].type))];
+            if (types.includes('Hydride (HP)') && compound.some(el => materialDatabase[el.symbol].pressure)) {
+                return compound.every(el => materialDatabase[el.symbol].pressure) ? '' : 'Warning: High-pressure materials require specific pressure conditions.';
+            }
+            if (compound.some(el => ['Hg', 'Tl', 'Hg1223'].includes(el.symbol))) {
+                return 'Warning: Mercury or thallium-based materials are toxic and unstable.';
+            }
+            return '';
+        }
+
+        function calculateCompound() {
+            const entries = document.querySelectorAll('.element-entry');
+            const operatingTemp = parseFloat(document.getElementById('operatingTemp').value);
+            const pressure = parseFloat(document.getElementById('pressure').value);
+            const output = document.getElementById('output');
+            
+            if (isNaN(operatingTemp) || operatingTemp < 0) {
+                output.innerHTML = `<p style="color: var(--danger-color);">Error: Please enter a valid operating temperature (≥ 0 K).</p>`;
+                return;
+            }
+            if (isNaN(pressure) || pressure < 0) {
+                output.innerHTML = `<p style="color: var(--danger-color);">Error: Please enter a valid pressure (≥ 0 GPa).</p>`;
+                return;
+            }
+
+            let compound = [], totalPercent = 0, error = '';
+            entries.forEach((entry, index) => {
+                const symbol = entry.querySelector('.element-symbol').value;
+                const percent = parseFloat(entry.querySelector('.element-percent').value);
+                const doping = parseFloat(entry.querySelector('.doping').value);
+                if (!symbol || isNaN(percent) || percent < 0 || percent > 100) {
+                    error = `Invalid input for material ${index + 1}.`;
+                }
+                compound.push({ symbol, percent, doping });
+                totalPercent += percent;
+            });
+
+            if (error) {
+                output.innerHTML = `<p style="color: var(--danger-color);">Error: ${error}</p>`;
+                return;
+            }
+            if (Math.abs(totalPercent - 100) > 0.01) {
+                output.innerHTML = `<p style="color: var(--danger-color);">Error: Percentages must sum to 100%. Current total: ${totalPercent.toFixed(1)}%</p>`;
+                return;
+            }
+
+            // Calculations
+            const crystalCompat = calculateCrystalCompatibility(compound);
+            const estimatedTc = estimateTc(compound, pressure);
+            const estimatedJc = estimateJc(compound);
+            const estimatedHc = estimateHc(compound, operatingTemp, estimatedTc);
+            const stabilityWarning = checkStability(compound);
+            const isSuperconductive = estimatedTc > operatingTemp && crystalCompat > 0.6 && estimatedJc > 100 && estimatedHc > 0.1;
+
+            // Output
+            let outputHtml = `<h2>Compound Analysis</h2><p><strong>Formula:</strong> ${compound.map(el => `${el.symbol}<sub>${(el.percent/10).toFixed(1)}</sub>`).join('')}</p>`;
+            outputHtml += `
+                <table>
+                    <tr>
+                        <th>Material</th><th>Symbol</th><th>%</th><th>Doping</th><th>Base Tc (K)</th><th>Hc (T)</th><th>Jc (MA/cm²)</th><th>Crystal Structure</th>
+                    </tr>
+            `;
+            compound.forEach(el => {
+                const data = materialDatabase[el.symbol];
+                const dopingText = el.doping === 0 ? 'None' : el.doping === 0.05 ? '5% SiC' : el.doping === 0.1 ? '10% SiC' : '15% Oxygen';
+                outputHtml += `
+                    <tr>
+                        <td>${data.name}</td><td>${el.symbol}</td><td>${el.percent.toFixed(1)}%</td><td>${dopingText}</td>
+                        <td>${data.Tc}</td><td>${data.Hc.toFixed(2)}</td><td>${(data.Jc/1000).toFixed(2)}</td><td>${data.crystalStructure}</td>
+                    </tr>
+                `;
+            });
+            outputHtml += '</table>';
+
+            outputHtml += `
+                <h3>Predicted Properties:</h3>
+                <p><strong>Operating Temperature:</strong> ${operatingTemp.toFixed(2)} K</p>
+                <p><strong>Pressure:</strong> ${pressure.toFixed(1)} GPa</p>
+                <p><strong>Crystal Structure Compatibility:</strong> ${(crystalCompat * 100).toFixed(0)}%</p>
+                <p><strong>Estimated Critical Temperature (Tc):</strong> ${estimatedTc.toFixed(2)} K</p>
+                <p><strong>Estimated Critical Magnetic Field (Hc):</strong> ${estimatedHc.toFixed(2)} T</p>
+                <p><strong>Estimated Critical Current Density (Jc):</strong> ${(estimatedJc/1000).toFixed(2)} MA/cm²</p>
+            `;
+            if (stabilityWarning) outputHtml += `<p style="color: var(--warning-color);">${stabilityWarning}</p>`;
+            outputHtml += `
+                <div class="final-verdict ${isSuperconductive ? 'verdict-yes' : 'verdict-no'}">
+                    At ${operatingTemp.toFixed(2)} K and ${pressure.toFixed(1)} GPa, this compound is predicted to be <strong>${isSuperconductive ? 'Superconductive' : 'Not Superconductive'}</strong>.
+                </div>
+                <p><em>Note: This model incorporates BCS theory, doping, and pressure effects but remains simplified. Real-world performance depends on additional factors like lattice dynamics and fabrication.</em></p>
+            `;
+
+            output.innerHTML = outputHtml;
+
+            // Chart.js Visualization
+            const ctx = document.getElementById('tcChart').getContext('2d');
+            if (window.myChart) window.myChart.destroy();
+            window.myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: Array.from({length: 10}, (_, i) => (operatingTemp * i / 9).toFixed(1)),
+                    datasets: [
+                        {
+                            label: 'Critical Current Density (MA/cm²)',
+                            data: Array.from({length: 10}, (_, i) => {
+                                const temp = operatingTemp * i / 9;
+                                return estimatedJc * (1 - Math.pow(temp / estimatedTc, 2)) / 1000;
+                            }),
+                            borderColor: 'var(--primary-accent)',
+                            fill: false
+                        },
+                        {
+                            label: 'Critical Magnetic Field (T)',
+                            data: Array.from({length: 10}, (_, i) => {
+                                const temp = operatingTemp * i / 9;
+                                return estimatedHc * (1 - Math.pow(temp / estimatedTc, 2));
+                            }),
+                            borderColor: 'var(--success-color)',
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        x: { title: { display: true, text: 'Temperature (K)' } },
+                        y: { title: { display: true, text: 'Value' } }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
